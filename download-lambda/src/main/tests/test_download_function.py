@@ -26,19 +26,22 @@ class TestDownloadFunction(unittest.TestCase):
         download_function.S3_BUCKET = None
         response = download_function.lambda_handler({}, None)
         self.assertEqual(response['statusCode'], 500)
-        self.assertIn('Variável de ambiente BUCKET não configurada', response['body'])
+        body = json.loads(response['body'])
+        self.assertIn('Variável de ambiente BUCKET não configurada', body['message'])
 
     def test_missing_table_env(self):
         download_function.TABLE_NAME = None
         response = download_function.lambda_handler({}, None)
         self.assertEqual(response['statusCode'], 500)
-        self.assertIn('Variável de ambiente TABLE não configurada', response['body'])
+        body = json.loads(response['body'])
+        self.assertIn('Variável de ambiente TABLE não configurada', body['message'])
 
     def test_missing_id_param(self):
         event = {'pathParameters': {}}
         response = download_function.lambda_handler(event, None)
         self.assertEqual(response['statusCode'], 400)
-        self.assertIn('Parâmetro id/filename ausente', response['body'])
+        body = json.loads(response['body'])
+        self.assertIn('Parâmetro id/filename ausente', body['message'])
 
     @patch('boto3.resource')
     def test_record_not_found(self, mock_dynamo_resource):
@@ -51,7 +54,8 @@ class TestDownloadFunction(unittest.TestCase):
         response = download_function.lambda_handler(event, None)
 
         self.assertEqual(response['statusCode'], 404)
-        self.assertIn('Registro não encontrado', response['body'])
+        body = json.loads(response['body'])
+        self.assertIn('Registro não encontrado', body['message'])
 
     @patch('boto3.resource')
     def test_record_found_no_s3_key(self, mock_dynamo_resource):
@@ -70,7 +74,8 @@ class TestDownloadFunction(unittest.TestCase):
         response = download_function.lambda_handler(event, None)
 
         self.assertEqual(response['statusCode'], 400)
-        self.assertIn('sem arquivo disponível ainda', response['body'])
+        body = json.loads(response['body'])
+        self.assertIn('sem arquivo disponível ainda', body['message'])
 
     @patch('boto3.client')
     @patch('boto3.resource')
