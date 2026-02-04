@@ -2,13 +2,9 @@ import os
 import json
 import logging
 import boto3
-
-# Exemplo de evento teste
-# {
-#   "pathParameters": {
-#     "filename": "teste@fiap.com.br_a8da122788884fe1b4c7b916032b8586"
-#   }
-# }
+import jwt
+import requests
+from jwt import PyJWKClient
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
@@ -16,12 +12,41 @@ logger.setLevel(logging.INFO)
 S3_BUCKET = os.environ.get('BUCKET')
 TABLE_NAME = os.environ.get('TABLE')
 
+def validar_jwt_cognito(event):
+    headers = event.get('headers') or {}
+    auth_header = headers.get('Authorization')
+    if not auth_header or not auth_header.startswith('Bearer '):
+        return False, 'Token JWT ausente ou mal formatado.'
+    token = auth_header.split(' ')[1]
+    COGNITO_USER_POOL_ID = os.environ.get('COGNITO_USER_POOL_ID')
+    COGNITO_REGION = os.environ.get('COGNITO_REGION')
+    COGNITO_ISSUER = f"https://cognito-idp.{COGNITO_REGION}.amazonaws.com/{COGNITO_USER_POOL_ID}"
+    COGNITO_JWKS_URL = f"{COGNITO_ISSUER}/.well-known/jwks.json"
+    try:
+        jwks_client = PyJWKClient(COGNITO_JWKS_URL)
+        signing_key = jwks_client.get_signing_key_from_jwt(token)
+        payload = jwt.decode(
+            token,
+            signing_key.key,
+            algorithms=["RS256"],
+            audience=None,
+            issuer=COGNITO_ISSUER
+        )
+        return True, payload
+    except Exception as e:
+        return False, str(e)
+
 def lambda_handler(event, context):
     """Handler Lambda para gerar URL de download (presigned).
 
     Espera `pathParameters.filename` contendo o nome do ZIP em `outputs/`.
     Retorna JSON com `download_url` em português.
     """
+    # Validação Cognito JWT
+    valido, info = validar_jwt_cognito(event)
+    if not valido:
+        return responder(401, {'success': False, 'message': f'Não autorizado: {info}'})
+
     if not S3_BUCKET:
         return responder(500, {'success': False, 'message': 'Variável de ambiente BUCKET não configurada'})
 
