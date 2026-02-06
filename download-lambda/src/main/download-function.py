@@ -2,9 +2,9 @@ import os
 import json
 import logging
 import boto3
-import jwt
-import requests
-from jwt import PyJWKClient
+import urllib.parse
+import urllib.request
+import base64
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
@@ -13,28 +13,55 @@ S3_BUCKET = os.environ.get('BUCKET')
 TABLE_NAME = os.environ.get('TABLE')
 
 def validar_jwt_cognito(event):
-    headers = event.get('headers') or {}
-    auth_header = headers.get('Authorization')
-    if not auth_header or not auth_header.startswith('Bearer '):
-        return False, 'Token JWT ausente ou mal formatado.'
-    token = auth_header.split(' ')[1]
-    COGNITO_USER_POOL_ID = os.environ.get('COGNITO_USER_POOL_ID')
-    COGNITO_REGION = os.environ.get('COGNITO_REGION')
-    COGNITO_ISSUER = f"https://cognito-idp.{COGNITO_REGION}.amazonaws.com/{COGNITO_USER_POOL_ID}"
-    COGNITO_JWKS_URL = f"{COGNITO_ISSUER}/.well-known/jwks.json"
+    # 1. Configurações do Cognito (Substitua pelos seus dados)
+    DOMAIN = "hackaton-11soat-auth-v2.auth.us-east-1.amazoncognito.com"
+    CLIENT_ID = "458sg2qduaf2ssokfrpl40p80f"
+    REDIRECT_URI = "https://exemplo.com/callback"
+    CODE = "1f83cfe0-bb47-46d4-8e92-43f7a2cfe61e"
+
+    # 3. Preparar a chamada para trocar o CODE por TOKENS
+    token_url = f"https://{DOMAIN}/oauth2/token"
+
+    data = {
+        'grant_type': 'authorization_code',
+        'client_id': CLIENT_ID,
+        'code': CODE,
+        'redirect_uri': REDIRECT_URI
+    }
+
+    encoded_data = urllib.parse.urlencode(data).encode('utf-8')
+    headers = {'Content-Type': 'application/x-www-form-urlencoded'}
+
     try:
-        jwks_client = PyJWKClient(COGNITO_JWKS_URL)
-        signing_key = jwks_client.get_signing_key_from_jwt(token)
-        payload = jwt.decode(
-            token,
-            signing_key.key,
-            algorithms=["RS256"],
-            audience=None,
-            issuer=COGNITO_ISSUER
-        )
-        return True, payload
+        # 4. Fazer a requisição POST
+        req = urllib.request.Request(token_url, data=encoded_data, headers=headers)
+        with urllib.request.urlopen(req) as response:
+            res_body = response.read()
+            tokens = json.loads(res_body.decode('utf-8'))
+
+            # O 'id_token' contém os dados do perfil do usuário
+            id_token = tokens.get('id_token')
+
+            # 5. Decodificar o ID Token para ver os dados (Email, Sub, etc)
+            # O ID Token é um JWT. A parte do meio (índice 1) contém os dados.
+            payload_b64 = id_token.split('.')[1]
+            # Adiciona padding se necessário para o base64
+            payload_json = base64.b64decode(payload_b64 + '===').decode('utf-8')
+            user_data = json.loads(payload_json)
+            user_email = user_data.get('email')
+            logger.info(f"Email: {user_email}")
+
+            return {
+                'statusCode': 200,
+                'body': json.dumps({
+                    'message': 'Dados do usuário recuperados!',
+                    'email': user_email
+                })
+            }
+
     except Exception as e:
-        return False, str(e)
+        print(f"Erro: {str(e)}")
+        return {'statusCode': 500, 'body': 'Erro ao trocar o código por tokens'}
 
 def lambda_handler(event, context):
     """Handler Lambda para gerar URL de download (presigned).
