@@ -16,8 +16,8 @@ def validar_jwt_cognito(event):
     # 1. Configurações do Cognito (Substitua pelos seus dados)
     DOMAIN = "hackaton-11soat-auth-v2.auth.us-east-1.amazoncognito.com"
     CLIENT_ID = "458sg2qduaf2ssokfrpl40p80f"
-    REDIRECT_URI = "https://exemplo.com/callback"
-    CODE = "1f83cfe0-bb47-46d4-8e92-43f7a2cfe61e"
+    REDIRECT_URI = "https://example.com/callback"
+    CODE = "7a7a6c8e-57f0-4715-9b36-32e1e5dee6d4"
 
     # 3. Preparar a chamada para trocar o CODE por TOKENS
     token_url = f"https://{DOMAIN}/oauth2/token"
@@ -59,9 +59,10 @@ def validar_jwt_cognito(event):
                 })
             }
 
-    except Exception as e:
-        print(f"Erro: {str(e)}")
-        return {'statusCode': 500, 'body': 'Erro ao trocar o código por tokens'}
+    except urllib.error.HTTPError as e:
+        error_details = e.read().decode()
+        print(f"Erro detalhado do Cognito: {error_details}")
+        return {'statusCode': e.code, 'body': error_details}
 
 def lambda_handler(event, context):
     """Handler Lambda para gerar URL de download (presigned).
@@ -69,10 +70,8 @@ def lambda_handler(event, context):
     Espera `pathParameters.filename` contendo o nome do ZIP em `outputs/`.
     Retorna JSON com `download_url` em português.
     """
-    # Validação Cognito JWT
-    valido, info = validar_jwt_cognito(event)
-    if not valido:
-        return responder(401, {'success': False, 'message': f'Não autorizado: {info}'})
+    #TODO Validação Cognito JWT validar email com o do request
+    validar_jwt_cognito(event)
 
     if not S3_BUCKET:
         return responder(500, {'success': False, 'message': 'Variável de ambiente BUCKET não configurada'})
