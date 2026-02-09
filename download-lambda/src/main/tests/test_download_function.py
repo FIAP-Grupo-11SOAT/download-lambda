@@ -43,22 +43,46 @@ class TestDownloadFunction(unittest.TestCase):
         body = json.loads(response['body'])
         self.assertIn('Parâmetro id/filename ausente', body['message'])
 
+    def test_missing_token(self):
+        event = {'pathParameters': {'filename': 'user@example.com_12345'}}
+        response = download_function.lambda_handler(event, None)
+        self.assertEqual(response['statusCode'], 401)
+        body = json.loads(response['body'])
+        self.assertIn('Token ausente', body['message'])
+
+    def test_invalid_token_format(self):
+        event = {
+            'pathParameters': {'filename': 'user@example.com_12345'},
+            'headers': {'Authorization': 'InvalidFormat'}
+        }
+        response = download_function.lambda_handler(event, None)
+        self.assertEqual(response['statusCode'], 401)
+        body = json.loads(response['body'])
+        self.assertIn('Formato de token inválido', body['message'])
+
+    @patch.object(download_function, 'validar_jwt')
     @patch('boto3.resource')
-    def test_record_not_found(self, mock_dynamo_resource):
+    def test_record_not_found(self, mock_dynamo_resource, mock_validar_jwt):
+        mock_validar_jwt.return_value = 'user@example.com'
+
         # Mock da tabela DynamoDB
         mock_table = MagicMock()
         mock_dynamo_resource.return_value.Table.return_value = mock_table
         mock_table.get_item.return_value = {} # Simula item não encontrado (vazio)
 
-        event = {'pathParameters': {'filename': 'user@example.com_12345'}}
+        event = {'pathParameters': {'filename': 'user@example.com_12345'},
+                 'headers': {'Authorization': 'Bearer token'}}
         response = download_function.lambda_handler(event, None)
 
         self.assertEqual(response['statusCode'], 404)
         body = json.loads(response['body'])
         self.assertIn('Registro não encontrado', body['message'])
 
+    @patch.object(download_function, 'validar_jwt')
     @patch('boto3.resource')
-    def test_record_found_no_s3_key(self, mock_dynamo_resource):
+    def test_record_found_no_s3_key(self, mock_dynamo_resource, mock_validar_jwt):
+        mock_validar_jwt.return_value = 'user@example.com'
+
         mock_table = MagicMock()
         mock_dynamo_resource.return_value.Table.return_value = mock_table
         # Simula item encontrado mas sem s3_key (ainda processando)
@@ -70,16 +94,20 @@ class TestDownloadFunction(unittest.TestCase):
             }
         }
 
-        event = {'pathParameters': {'filename': 'user@example.com_12345'}}
+        event = {'pathParameters': {'filename': 'user@example.com_12345'},
+                 'headers': {'Authorization': 'Bearer token'}}
         response = download_function.lambda_handler(event, None)
 
         self.assertEqual(response['statusCode'], 400)
         body = json.loads(response['body'])
         self.assertIn('sem arquivo disponível ainda', body['message'])
 
+    @patch.object(download_function, 'validar_jwt')
     @patch('boto3.client')
     @patch('boto3.resource')
-    def test_success_download_url(self, mock_dynamo_resource, mock_s3_client):
+    def test_success_download_url(self, mock_dynamo_resource, mock_s3_client, mock_validar_jwt):
+        mock_validar_jwt.return_value = 'user@example.com'
+
         # Mock DynamoDB retornando registro completo
         mock_table = MagicMock()
         mock_dynamo_resource.return_value.Table.return_value = mock_table
@@ -96,7 +124,8 @@ class TestDownloadFunction(unittest.TestCase):
         expected_url = 'https://s3.amazonaws.com/bucket/outputs/video.zip?signature=xyz'
         mock_s3_client.return_value.generate_presigned_url.return_value = expected_url
 
-        event = {'pathParameters': {'filename': 'user@example.com_12345'}}
+        event = {'pathParameters': {'filename': 'user@example.com_12345'},
+                 'headers': {'Authorization': 'Bearer token'}}
         response = download_function.lambda_handler(event, None)
 
         self.assertEqual(response['statusCode'], 200)

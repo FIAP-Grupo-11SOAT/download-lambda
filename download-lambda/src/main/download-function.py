@@ -28,7 +28,9 @@ def lambda_handler(event, context):
     if not record_id_raw:
         return responder(400, {'success': False, 'message': 'Parâmetro id/filename ausente'})
 
-    user_email = validar_jwt(id_token)
+    user_email, error_response = autenticar_usuario(event)
+    if error_response:
+        return error_response
 
     try:
         # Extrai o upload_id do parâmetro original e usa o email autenticado
@@ -71,6 +73,7 @@ def obter_id_registro(event):
     params = event.get('pathParameters') or {}
     return params.get('filename') or params.get('id')
 
+
 def buscar_registro(table, record_id):
     try:
         # O record_id é composto por "email_uploadId"
@@ -95,22 +98,33 @@ def responder(status_code, body_dict):
         'body': json.dumps(body_dict)
     }
 
+def autenticar_usuario(event):
+    headers = event.get('headers') or {}
+    auth_header = headers.get('Authorization') or headers.get('authorization')
+
+    if not auth_header:
+        return None, responder(401, {'success': False, 'message': 'Token ausente'})
+
+    try:
+        id_token = auth_header.split(' ')[1]
+    except IndexError:
+        return None, responder(401, {'success': False, 'message': 'Formato de token inválido'})
+
+    return validar_jwt(id_token), None
+
 def validar_jwt(id_token):
-            # O 'id_token' contém os dados do perfil do usuário
-            id_token = tokens.get('id_token')
+    try:
+        # 5. Decodificar o ID Token para ver os dados (Email, Sub, etc)
+        # O ID Token é um JWT. A parte do meio (índice 1) contém os dados.
+        payload_b64 = id_token.split('.')[1]
+        # Adiciona padding se necessário para o base64
+        payload_json = base64.b64decode(payload_b64 + '===').decode('utf-8')
+        user_data = json.loads(payload_json)
+        user_email = user_data.get('email')
+        logger.info(f"Email: {user_email}")
 
-            # 5. Decodificar o ID Token para ver os dados (Email, Sub, etc)
-            # O ID Token é um JWT. A parte do meio (índice 1) contém os dados.
-            payload_b64 = id_token.split('.')[1]
-            # Adiciona padding se necessário para o base64
-            payload_json = base64.b64decode(payload_b64 + '===').decode('utf-8')
-            user_data = json.loads(payload_json)
-            user_email = user_data.get('email')
-            logger.info(f"Email: {user_email}")
+        return user_email
 
-            return user_email
-
-    except urllib.error.HTTPError as e:
-        error_details = e.read().decode()
-        logger.error(f"Erro detalhado do Cognito: {error_details}")
+    except Exception as e:
+        logger.error(f"Erro ao decodificar token: {e}")
         return None
