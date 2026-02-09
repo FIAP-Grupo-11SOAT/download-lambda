@@ -2,7 +2,6 @@ import os
 import json
 import logging
 import boto3
-import urllib.parse
 import urllib.request
 import base64
 
@@ -18,10 +17,6 @@ def lambda_handler(event, context):
     Espera `pathParameters.filename` contendo o nome do ZIP em `outputs/`.
     Retorna JSON com `download_url` em português.
     """
-    #TODO Validação Cognito JWT validar email com o do request
-    user_email = validar_jwt_cognito(event)
-    if not user_email:
-        return responder(401, {'success': False, 'message': 'Falha na autenticação com Cognito'})
 
     if not S3_BUCKET:
         return responder(500, {'success': False, 'message': 'Variável de ambiente BUCKET não configurada'})
@@ -33,12 +28,17 @@ def lambda_handler(event, context):
     if not record_id_raw:
         return responder(400, {'success': False, 'message': 'Parâmetro id/filename ausente'})
 
+    user_email = validar_jwt(id_token)
+
     try:
         # Extrai o upload_id do parâmetro original e usa o email autenticado
         _, upload_id = record_id_raw.rsplit('_', 1)
         record_id = f"{user_email}_{upload_id}"
     except ValueError:
         return responder(400, {'success': False, 'message': 'Formato de ID inválido'})
+
+    if not user_email:
+        return responder(401, {'success': False, 'message': 'Falha na autenticação'})
 
     logger.info(f"Iniciando busca de download para o ID: {record_id}")
 
@@ -95,38 +95,7 @@ def responder(status_code, body_dict):
         'body': json.dumps(body_dict)
     }
 
-def validar_jwt_cognito(event):
-    # 1. Configurações do Cognito (Substitua pelos seus dados)
-    DOMAIN = "hackaton-11soat-auth-v2.auth.us-east-1.amazoncognito.com"
-    CLIENT_ID = "458sg2qduaf2ssokfrpl40p80f"
-    REDIRECT_URI = "https://example.com/callback"
-    
-    params = event.get('queryStringParameters') or {}
-    code = params.get('code')
-    
-    if not code:
-        return None
-
-    # 3. Preparar a chamada para trocar o CODE por TOKENS
-    token_url = f"https://{DOMAIN}/oauth2/token"
-
-    data = {
-        'grant_type': 'authorization_code',
-        'client_id': CLIENT_ID,
-        'code': code,
-        'redirect_uri': REDIRECT_URI
-    }
-
-    encoded_data = urllib.parse.urlencode(data).encode('utf-8')
-    headers = {'Content-Type': 'application/x-www-form-urlencoded'}
-
-    try:
-        # 4. Fazer a requisição POST
-        req = urllib.request.Request(token_url, data=encoded_data, headers=headers)
-        with urllib.request.urlopen(req) as response:
-            res_body = response.read()
-            tokens = json.loads(res_body.decode('utf-8'))
-
+def validar_jwt(id_token):
             # O 'id_token' contém os dados do perfil do usuário
             id_token = tokens.get('id_token')
 
